@@ -4,9 +4,7 @@ const { execSync } = require('child_process');
 const path = require('path');
 
 async function startTelegramBot() {
-    // Environment Variables ලබාගැනීම
     const token = process.env.TELEGRAM_TOKEN;
-    // Google Script එකෙන් එවන ID එක (Capital හෝ Simple දෙකම බලනවා)
     const chatId = process.env.USER_CHAT_ID || process.env.user_chat_id; 
     const fileId = process.env.FILE_ID;
 
@@ -18,24 +16,29 @@ async function startTelegramBot() {
     const bot = new TelegramBot(token, { polling: false });
 
     try {
-        console.log(`🚀 Starting for Chat ID: ${chatId}`);
+        console.log(`🚀 Request Received for Chat: ${chatId}`);
         await bot.sendMessage(chatId, "🍿 *MFlix Engine:* Request Received...", { parse_mode: 'Markdown' });
 
         // --- 1. Google Drive එකෙන් Download කිරීම ---
         console.log("📥 Downloading from Google Drive...");
         await bot.sendMessage(chatId, "📥 *Download වෙමින් පවතී...*", { parse_mode: 'Markdown' });
         
-        // gdown භාවිතයෙන් ෆයිල් එක ගැනීම
-        execSync(`gdown --fuzzy https://drive.google.com/uc?id=${fileId} --confirm-form-recovery`);
+        // gdown command එකේ --confirm-form-recovery අයින් කරලා --fuzzy සහ --id පාවිච්චි කරලා තියෙනවා
+        try {
+            execSync(`gdown --id ${fileId} --fuzzy --confirm`);
+        } catch (downloadErr) {
+            console.log("Retry download without fuzzy...");
+            execSync(`gdown --id ${fileId} --confirm`);
+        }
 
-        // Download වුණු ෆයිල් එකේ නම සොයාගැනීම
+        // Download වුණු ෆයිල් එක සොයාගැනීම
         const currentFiles = fs.readdirSync('.');
         const ignoreFiles = ['send.js', 'package.json', 'node_modules', '.github', 'package-lock.json'];
         const finalFile = currentFiles.find(f => 
             !ignoreFiles.includes(f) && !fs.lstatSync(f).isDirectory()
         );
 
-        if (!finalFile) throw new Error("File Download Failed or Not Found!");
+        if (!finalFile) throw new Error("File Download Failed! Please check if the Drive link is public.");
 
         console.log(`✅ Downloaded: ${finalFile}`);
 
@@ -55,27 +58,23 @@ async function startTelegramBot() {
 
         console.log("📤 Sending to Telegram...");
         
-        // Document එකක් ලෙස යැවීම (Quality එක අඩුවෙන්නේ නැහැ)
+        // ලොකු ෆයිල් යවද්දී එන timeout අවුල් මගහැරීමට stream එකක් ලෙස යැවීම
         await bot.sendDocument(chatId, fs.createReadStream(finalFile), {
             caption: caption,
             parse_mode: 'Markdown'
         });
 
-        console.log("✅ Process Completed Successfully!");
+        console.log("✅ All Done!");
         
-        // --- 3. පිරිසිදු කිරීම (Cleanup) ---
-        if (fs.existsSync(finalFile)) {
-            fs.unlinkSync(finalFile);
-            console.log("🧹 Local file deleted.");
-        }
-        
+        // Cleanup
+        if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
         process.exit(0);
 
     } catch (err) {
-        console.error("❌ Error occurred:", err.message);
+        console.error("❌ Error:", err.message);
         try {
-            await bot.sendMessage(chatId, "❌ *දෝෂයක් සිදු විය:* \n" + err.message);
-        } catch (e) { console.log("Could not send error message to user."); }
+            await bot.sendMessage(chatId, "❌ *දෝෂයක් සිදු විය:* \n`" + err.message + "`");
+        } catch (e) { console.log("Silent Error"); }
         process.exit(1);
     }
 }
