@@ -1,60 +1,78 @@
-const TelegramBot = require('node-telegram-bot-api');
-const fs = require('fs');
+const { TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions");
+const fs = require("fs");
 const { execSync } = require('child_process');
 const path = require('path');
 
-async function startTelegramBot() {
-    const token = process.env.TELEGRAM_TOKEN;
-    const chatId = process.env.USER_CHAT_ID || process.env.user_chat_id; 
-    const fileId = process.env.FILE_ID;
+// GitHub Secrets වලින් දත්ත ලබාගැනීම
+const apiId = parseInt(process.env.TELEGRAM_API_ID);
+const apiHash = process.env.TELEGRAM_API_HASH;
+const botToken = process.env.TELEGRAM_TOKEN;
+const chatId = process.env.USER_CHAT_ID || process.env.user_chat_id;
+const fileId = process.env.FILE_ID;
 
-    if (!token || !chatId || !fileId) {
-        process.exit(1);
-    }
+const stringSession = new StringSession(""); // Bot කෙනෙක් නිසා හිස්ව තැබිය හැක
 
-    const bot = new TelegramBot(token, { polling: false });
+(async () => {
+    console.log("🚀 MFlix GramJS Engine Starting...");
+    const client = new TelegramClient(stringSession, apiId, apiHash, {
+        connectionRetries: 5,
+    });
 
     try {
-        await bot.sendMessage(chatId, "🍿 *MFlix Engine:* Request Received...", { parse_mode: 'Markdown' });
-        await bot.sendMessage(chatId, "📥 *Download වෙමින් පවතී...*", { parse_mode: 'Markdown' });
+        // බොට් කෙනෙක් ලෙස ලොග් වීම
+        await client.start({
+            botAuthToken: botToken,
+        });
+        console.log("✅ Bot Authenticated Successfully!");
+
+        // 1. Google Drive එකෙන් Download කිරීම
+        console.log("📥 Downloading file from Drive...");
+        try {
+            execSync(`gdown ${fileId} --fuzzy --confirm`);
+        } catch (e) {
+            execSync(`gdown ${fileId}`);
+        }
+
+        // Download වුණු ෆයිල් එක සොයාගැනීම
+        const files = fs.readdirSync('.');
+        const ignore = ['send.js', 'package.json', 'node_modules', '.github', 'package-lock.json'];
+        const finalFile = files.find(f => !ignore.includes(f) && !fs.lstatSync(f).isDirectory());
+
+        if (!finalFile) throw new Error("Download Failed! No file found.");
+
+        const stats = fs.statSync(finalFile);
+        const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+        console.log(`✅ File Ready: ${finalFile} (${fileSizeMB} MB)`);
+
+        // 2. Telegram එකට Upload කිරීම (Large File Support)
+        console.log("📤 Uploading to Telegram...");
         
-        // --- මෙන්න මෙතන තමයි වෙනස ---
-        execSync(`gdown ${fileId}`);
-
-        const currentFiles = fs.readdirSync('.');
-        const ignoreFiles = ['send.js', 'package.json', 'node_modules', '.github', 'package-lock.json'];
-        const finalFile = currentFiles.find(f => 
-            !ignoreFiles.includes(f) && !fs.lstatSync(f).isDirectory()
-        );
-
-        if (!finalFile) throw new Error("File Download Failed!");
-
-        await bot.sendMessage(chatId, "📤 *Upload වෙමින් පවතී...*", { parse_mode: 'Markdown' });
-
-        const ext = path.extname(finalFile).toLowerCase();
-        const isSub = ['.srt', '.vtt', '.ass'].includes(ext);
-        const fileType = isSub ? "Subtitles" : "Video";
-
-        let caption = `💚 *${fileType} Uploaded Successfully!* 🍿\n\n` +
-                      `📦 *File :* \`${finalFile}\` \n\n` +
+        let caption = `💚 *Movie Uploaded Successfully!* 🍿\n\n` +
+                      `📦 *File :* \`${finalFile}\` \n` +
+                      `📏 *Size :* ${fileSizeMB} MB\n\n` +
                       `🏷️ *Mflix WhDownloader*\n` +
-                      `💌 *Made With Sashika Sandras*\n\n` +
-                      `☺️ *Mflix භාවිතා කළ ඔබට සුභ දවසක්...*\n` +
-                      `*කරුණාකර Report කිරීමෙන් වළකින්න...* 💝`;
+                      `💌 *Made With Sashika Sandras*`;
 
-        await bot.sendDocument(chatId, fs.createReadStream(finalFile), {
+        await client.sendFile(chatId, {
+            file: finalFile,
             caption: caption,
-            parse_mode: 'Markdown'
+            parseMode: "markdown",
+            forceDocument: true, // වීඩියෝ එක Document එකක් ලෙස යැවීමට
+            workers: 4, // Upload speed එක වැඩි කිරීමට
+            progressCallback: (p) => {
+                console.log(`Upload Progress: ${(p * 100).toFixed(2)}%`);
+            },
         });
 
+        console.log("✅ Upload Completed!");
+
+        // Cleanup
         if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
         process.exit(0);
 
     } catch (err) {
-        console.error(err);
-        await bot.sendMessage(chatId, "❌ *දෝෂයක් සිදු විය:* \n`" + err.message + "`");
+        console.error("❌ Error:", err.message);
         process.exit(1);
     }
-}
-
-startTelegramBot();
+})();
