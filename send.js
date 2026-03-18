@@ -4,53 +4,78 @@ const { execSync } = require('child_process');
 const path = require('path');
 
 async function startTelegramBot() {
-    const token = process.env.TELEGRAM_TOKEN; // BotFather ගෙන් ගත්ත Token එක
-    const chatId = process.env.USER_CHAT_ID;  // ඔයාගේ Telegram Chat ID එක
+    // Environment Variables ලබාගැනීම
+    const token = process.env.TELEGRAM_TOKEN;
+    // Google Script එකෙන් එවන ID එක (Capital හෝ Simple දෙකම බලනවා)
+    const chatId = process.env.USER_CHAT_ID || process.env.user_chat_id; 
     const fileId = process.env.FILE_ID;
+
+    if (!token || !chatId || !fileId) {
+        console.error("❌ Missing Required Environment Variables!");
+        process.exit(1);
+    }
 
     const bot = new TelegramBot(token, { polling: false });
 
     try {
-        await bot.sendMessage(chatId, "✅ *Request Received...*", { parse_mode: 'Markdown' });
-        await bot.sendMessage(chatId, "📥 *Download වෙමින් පවතී...*", { parse_mode: 'Markdown' });
+        console.log(`🚀 Starting for Chat ID: ${chatId}`);
+        await bot.sendMessage(chatId, "🍿 *MFlix Engine:* Request Received...", { parse_mode: 'Markdown' });
 
-        // --- Download Logic ---
-        let finalFile = "";
-        execSync(`gdown --fuzzy https://drive.google.com/uc?id=${fileId}`);
+        // --- 1. Google Drive එකෙන් Download කිරීම ---
+        console.log("📥 Downloading from Google Drive...");
+        await bot.sendMessage(chatId, "📥 *Download වෙමින් පවතී...*", { parse_mode: 'Markdown' });
         
-        const files = fs.readdirSync('.');
-        finalFile = files.find(f => 
-            !['send.js', 'package.json', 'node_modules', '.github', 'package-lock.json'].includes(f) && 
-            !fs.lstatSync(f).isDirectory()
+        // gdown භාවිතයෙන් ෆයිල් එක ගැනීම
+        execSync(`gdown --fuzzy https://drive.google.com/uc?id=${fileId} --confirm-form-recovery`);
+
+        // Download වුණු ෆයිල් එකේ නම සොයාගැනීම
+        const currentFiles = fs.readdirSync('.');
+        const ignoreFiles = ['send.js', 'package.json', 'node_modules', '.github', 'package-lock.json'];
+        const finalFile = currentFiles.find(f => 
+            !ignoreFiles.includes(f) && !fs.lstatSync(f).isDirectory()
         );
 
-        if (!finalFile) throw new Error("File Download Failed");
+        if (!finalFile) throw new Error("File Download Failed or Not Found!");
 
+        console.log(`✅ Downloaded: ${finalFile}`);
+
+        // --- 2. Telegram එකට Upload කිරීම ---
         await bot.sendMessage(chatId, "📤 *Upload වෙමින් පවතී...*", { parse_mode: 'Markdown' });
 
         const ext = path.extname(finalFile).toLowerCase();
         const isSub = ['.srt', '.vtt', '.ass'].includes(ext);
-        let status = isSub ? "Subtitles Upload Successfully..." : "Video Upload Successfully...";
+        const fileType = isSub ? "Subtitles" : "Video";
 
-        let caption = `💚 *${status}*\n\n` +
-                      `📦 *File :* ${finalFile}\n\n` +
+        let caption = `💚 *${fileType} Uploaded Successfully!* 🍿\n\n` +
+                      `📦 *File :* \`${finalFile}\` \n\n` +
                       `🏷️ *Mflix WhDownloader*\n` +
                       `💌 *Made With Sashika Sandras*\n\n` +
                       `☺️ *Mflix භාවිතා කළ ඔබට සුභ දවසක්...*\n` +
                       `*කරුණාකර Report කිරීමෙන් වළකින්න...* 💝`;
 
-        // --- Telegram එකට Document එකක් ලෙස යැවීම ---
+        console.log("📤 Sending to Telegram...");
+        
+        // Document එකක් ලෙස යැවීම (Quality එක අඩුවෙන්නේ නැහැ)
         await bot.sendDocument(chatId, fs.createReadStream(finalFile), {
             caption: caption,
             parse_mode: 'Markdown'
         });
 
-        if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
+        console.log("✅ Process Completed Successfully!");
+        
+        // --- 3. පිරිසිදු කිරීම (Cleanup) ---
+        if (fs.existsSync(finalFile)) {
+            fs.unlinkSync(finalFile);
+            console.log("🧹 Local file deleted.");
+        }
+        
         process.exit(0);
 
     } catch (err) {
-        console.error(err);
-        await bot.sendMessage(chatId, "❌ *වීඩියෝ හෝ Subtitles ගොනුවේ දෝෂයක්...*");
+        console.error("❌ Error occurred:", err.message);
+        try {
+            await bot.sendMessage(chatId, "❌ *දෝෂයක් සිදු විය:* \n" + err.message);
+        } catch (e) { console.log("Could not send error message to user."); }
         process.exit(1);
     }
 }
