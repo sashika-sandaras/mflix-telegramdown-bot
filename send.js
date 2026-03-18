@@ -10,34 +10,64 @@ const chatId = process.env.USER_CHAT_ID;
 const fileId = process.env.FILE_ID;
 
 (async () => {
-    console.log("🚀 MFlix Engine Starting...");
     const client = new TelegramClient(new StringSession(""), apiId, apiHash, { connectionRetries: 5 });
 
     try {
         await client.start({ botAuthToken: botToken });
 
-        // 1. Download
-        execSync(`gdown ${fileId} --fuzzy --confirm || gdown ${fileId}`);
+        // 1. මුලින්ම Request එක ලැබුණු බව දැනුම් දීම
+        await client.sendMessage(chatId, { message: "✅ Request Received..." });
 
-        // 2. Select File (Blocking README.md)
+        console.log("📥 Downloading...");
+        await client.sendMessage(chatId, { message: "📥 Download වෙමින් පවතී..." });
+        
+        try {
+            execSync(`gdown ${fileId} --fuzzy --confirm`);
+        } catch (e) {
+            execSync(`gdown ${fileId}`);
+        }
+
+        // 2. ෆයිල් එක තෝරා ගැනීම
         const files = fs.readdirSync('.');
         const blackList = ['README.md', 'send.js', 'package.json', 'node_modules', '.github', '.git', 'LICENSE', 'yarn.lock', 'package-lock.json'];
 
         const finalFile = files.find(f => {
             const fileName = f.toLowerCase();
             const isDir = fs.lstatSync(f).isDirectory();
-            const isVideo = fileName.endsWith('.mp4') || fileName.endsWith('.mkv') || fileName.endsWith('.zip') || fileName.endsWith('.srt');
-            return !isDir && !blackList.includes(f) && isVideo;
+            const isTarget = fileName.endsWith('.mp4') || fileName.endsWith('.mkv') || 
+                             fileName.endsWith('.srt') || fileName.endsWith('.vtt') || 
+                             fileName.endsWith('.zip');
+            return !isDir && !blackList.includes(f) && isTarget;
         });
 
-        if (!finalFile) throw new Error("Video file not found!");
+        if (!finalFile) {
+            await client.sendMessage(chatId, { message: "❌ වීඩියෝ හෝ Subtitles ගොනුවේ දෝෂයක්..." });
+            process.exit(1);
+        }
 
-        // 3. Send as ORIGINAL DOCUMENT
+        const fileName = finalFile.toLowerCase();
+        let caption = "";
+        let successMsg = "";
+
+        // 3. ෆයිල් වර්ගය අනුව මැසේජ් එක සැකසීම
+        if (fileName.endsWith('.mp4') || fileName.endsWith('.mkv')) {
+            successMsg = "💚 Video Upload Successfully...";
+            caption = `💚 *Video Upload Successfully...*\n\n📦 *File :* ${finalFile}\n\n🏷️ *Mflix WhDownloader*\n💌 *Made With Sashika Sandras*\n\n☺️ Mflix භාවිතා කළ ඔබට සුභ දවසක්...කරුණාකර Report කිරීමෙන් වළකින්...💝`;
+        } else if (fileName.endsWith('.srt') || fileName.endsWith('.vtt')) {
+            successMsg = "💚 Subtitles Upload Successfully...";
+            caption = `💚 *Subtitles Upload Successfully...*\n\n📦 *File :* ${finalFile}\n\n🏷️ *Mflix WhDownloader*\n💌 *Made With Sashika Sandras*\n\n☺️ Mflix භාවිතා කළ ඔබට සුභ දවසක්...කරුණාකර Report කිරීමෙන් වළකින්...💝`;
+        } else {
+            caption = `📦 *File :* ${finalFile}\n\n🏷️ *Mflix WhDownloader*\n💌 *Made With Sashika Sandras*`;
+        }
+
+        await client.sendMessage(chatId, { message: "📤 Upload වෙමින් පවතී..." });
+
+        // 4. ෆයිල් එක යැවීම
         await client.sendFile(chatId, {
             file: finalFile,
-            caption: `🎬 *MFlix Original File* \n\n📦 \`${finalFile}\``,
+            caption: caption,
             parseMode: "markdown",
-            forceDocument: true,     // Original File ලෙස යැවීමට ✅
+            forceDocument: true, 
             workers: 16
         });
 
@@ -47,6 +77,9 @@ const fileId = process.env.FILE_ID;
 
     } catch (err) {
         console.error("❌ Error:", err.message);
+        try {
+            await client.sendMessage(chatId, { message: "❌ වීඩියෝ හෝ Subtitles ගොනුවේ දෝෂයක්..." });
+        } catch (e) {}
         process.exit(1);
     }
 })();
