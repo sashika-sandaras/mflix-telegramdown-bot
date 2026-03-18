@@ -1,0 +1,35 @@
+name: MFlix Telegram Sender
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_id:
+        required: true
+      user_chat_id:
+        required: true
+
+concurrency:
+  group: tg-bot-queue
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install
+        run: |
+          pip install gdown
+          npm install
+      - name: Run
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          USER_CHAT_ID: ${{ github.event.inputs.user_chat_id }}
+          FILE_ID: ${{ github.event.inputs.file_id }}
+        run: node send.js
